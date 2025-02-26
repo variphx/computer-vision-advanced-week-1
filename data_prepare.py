@@ -1,40 +1,53 @@
-import csv
 import shutil
-import numpy as np
 from pathlib import Path
+from tqdm.auto import tqdm
 
-DATA_DIR = Path("data")
+from torchvision.io import decode_image, ImageReadMode
+from torchvision.transforms.v2 import (
+    Compose,
+    RandomResizedCrop,
+    RandomHorizontalFlip,
+    RandomVerticalFlip,
+)
+from torchvision.utils import save_image
 
-with open(DATA_DIR / "trainLabels.csv", "r") as f:
-    csv_read = csv.reader(f)
-    next(csv_read)
+transforms = Compose(
+    [
+        RandomResizedCrop((224, 224), antialias=True),
+        RandomHorizontalFlip(),
+        RandomVerticalFlip(),
+    ]
+)
 
-    class_names = set()
 
-    for _, class_name in csv_read:
-        class_names.add(class_name)
+def augmentate(image_path: str, multiply_coeff: int = 5):
+    image = decode_image(image_path, mode=ImageReadMode.RGB)
+    for _ in range(multiply_coeff):
+        yield transforms(image)
 
-random_class_indices = np.random.randint(low=0, high=len(class_names), size=(4,))
-class_names = sorted(class_names)
-class_names = set(class_names[index] for index in random_class_indices)
 
-TRAIN_IMAGES_DIR = DATA_DIR / "train"
-SELECTED_IMAGES_DIR = DATA_DIR / "selected"
+def augmentate_data_dir(data_dir: str, augmentated_dir: str):
+    data_dir: Path = Path(data_dir)
+    augmentated_dir: Path = Path(augmentated_dir)
 
-if SELECTED_IMAGES_DIR.exists():
-    SELECTED_IMAGES_DIR.rmdir()
-    
-SELECTED_IMAGES_DIR.mkdir()
+    if not augmentated_dir.exists():
+        augmentated_dir.mkdir()
 
-with open(DATA_DIR / "trainLabels.csv", "r") as f:
-    csv_read = csv.reader(f)
-    next(csv_read)
+    for class_dir in data_dir.iterdir():
+        class_name = class_dir.name
 
-    for image_id, class_name in csv_read:
-        if class_name not in class_names:
-            continue
+        augmentated_class_dir = augmentated_dir / class_name
+        if augmentated_class_dir.exists():
+            shutil.rmtree(augmentated_class_dir)
+        augmentated_class_dir.mkdir()
 
-        CLASS_DIR = SELECTED_IMAGES_DIR / class_name
-        CLASS_DIR.mkdir(exist_ok=True)
+        for image_path in tqdm(class_dir.iterdir(), desc=class_name):
+            for i, augmented_image in enumerate(augmentate(str(image_path))):
+                save_image(
+                    augmented_image,
+                    augmentated_class_dir
+                    / f"{image_path.name[:image_path.name.find('.')]}_{i+1}.png",
+                )
 
-        shutil.copy(TRAIN_IMAGES_DIR / f"{image_id}.png", CLASS_DIR / f"{image_id}.png")
+
+augmentate_data_dir("data", "augmented_data")
